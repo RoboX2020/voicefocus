@@ -1,14 +1,37 @@
+# ============================================================================
+# test_run.py - a self-test for VoiceFocus. No web page involved.
+#
+# WHAT IT CHECKS, IN PLAIN WORDS:
+#   1. Builds a fake "two people talking" recording by mixing two test clips
+#      (two different speakers) together.
+#   2. Runs the real pipeline (isolate_core from app.py) with a reference
+#      clip of speaker 1.
+#   3. Asks the speaker-matching AI: does the isolated result sound more
+#      like speaker 1 than speaker 2? If yes, the app picked the right voice.
+#   4. Runs once more with a time range (0.5s to 2.0s) to check that the
+#      trimming feature returns a clip of about 1.5 seconds.
+#
+# RUN IT WITH:  python test_run.py
+# The test audio files live in the test/ folder next to this file.
+# ============================================================================
+
 import sys, os
+# let Python find app.py next to this file
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import torch, torchaudio
 from app import isolate_core, load_mono, load_models, TARGET_SR, _save_wav
 
 d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test")
+
+# Load one sentence from speaker 1 and one from speaker 2.
 s1 = load_mono(os.path.join(d, "spk1_snt1.wav"))
 s2 = load_mono(os.path.join(d, "spk2_snt1.wav"))
+# Pad the shorter clip with silence so both are the same length (you cannot
+# mix two clips of different lengths).
 T = max(s1.shape[1], s2.shape[1])
 s1 = torch.nn.functional.pad(s1, (0, T - s1.shape[1]))
 s2 = torch.nn.functional.pad(s2, (0, T - s2.shape[1]))
+# Mix the two voices at 60% volume each so the result does not get too loud.
 mix = (s1 * 0.6 + s2 * 0.6)
 mix_p = os.path.join(d, "mix.wav")
 torchaudio.save(mix_p, mix, TARGET_SR)
@@ -24,6 +47,8 @@ e_out = spk.encode_batch(load_mono(out_t)).flatten()
 e_s1 = spk.encode_batch(s1).flatten()
 e_s2 = spk.encode_batch(s2).flatten()
 cs = torch.nn.functional.cosine_similarity
+# These two scores are the actual test result: the first number should be
+# clearly bigger than the second.
 print("sim(out, spk1) =", cs(e_out, e_s1, dim=0).item())
 print("sim(out, spk2) =", cs(e_out, e_s2, dim=0).item())
 
@@ -31,4 +56,5 @@ print("sim(out, spk2) =", cs(e_out, e_s2, dim=0).item())
 out_t2, out_o2, status2 = isolate_core(mix_p, ref_p, 0.5, 2.0)
 w, fs = torchaudio.load(out_t2)
 print("TRIM STATUS:", status2)
+# should be about 1.5
 print("trimmed seconds:", w.shape[1] / fs)
